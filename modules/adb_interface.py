@@ -135,11 +135,43 @@ class ADBInterface:
         return None
 
     def get_ui_xml(self) -> Optional[str]:
-        """获取当前UI的XML结构"""
-        try:
-            # 使用标准的dump到文件再读取方法
-            self.logger.debug("获取UI XML")
+        """获取当前UI的XML结构，使用多种方法重试"""
+        max_attempts = 3
+        
+        for attempt in range(max_attempts):
+            self.logger.debug("获取UI XML - 第%d次尝试", attempt + 1)
             
+            # 尝试方法1: 标准dump到文件
+            xml_content = self._try_standard_dump()
+            if xml_content:
+                return xml_content
+            
+            # 尝试方法2: 强制等待后重试
+            if attempt == 0:
+                self.logger.debug("标准dump失败，等待设备稳定后重试")
+                time.sleep(2)
+                xml_content = self._try_standard_dump()
+                if xml_content:
+                    return xml_content
+            
+            # 尝试方法3: 使用压缩dump (Android 7+)
+            if attempt == 1:
+                xml_content = self._try_compressed_dump()
+                if xml_content:
+                    return xml_content
+            
+            # 最后尝试：直接输出到stdout（容错性最高）
+            if attempt == max_attempts - 1:
+                xml_content = self._try_stdout_dump()
+                if xml_content:
+                    return xml_content
+        
+        self.logger.error("所有UI获取方法都失败了")
+        return None
+
+    def _try_standard_dump(self) -> Optional[str]:
+        """尝试标准的dump到文件方法"""
+        try:
             # 先清除旧文件
             self.execute_command([
                 "shell", "rm", "-f", "/sdcard/window_dump.xml"
@@ -150,7 +182,7 @@ class ADBInterface:
                 "shell", "uiautomator", "dump", "/sdcard/window_dump.xml"
             ])
             
-            if dump_result is not None:
+            if dump_result is not None and "ERROR:" not in str(dump_result):
                 # 等待文件写入完成
                 time.sleep(1)
                 
@@ -162,7 +194,7 @@ class ADBInterface:
                 if xml_result and len(xml_result) > 100 and "<?xml" in xml_result:
                     # 验证XML格式
                     if xml_result.count("<?xml") == 1:
-                        self.logger.debug("成功获取UI XML，长度: %d", len(xml_result))
+                        self.logger.debug("标准dump成功，XML长度: %d", len(xml_result))
                         return xml_result
                     else:
                         self.logger.warning("XML内容包含重复头部，尝试清理")
@@ -345,3 +377,156 @@ class ADBInterface:
             
         self.logger.warning("等待文本 '%s' 超时", text)
         return False
+
+    def is_douyin_in_splash(self) -> bool:
+        """检查抖音是否在启动画面"""
+        try:
+            result = self.execute_command([
+                "shell", "dumpsys", "activity", "|", "grep", 
+                "mCurrentFocus.*com.ss.android.ugc.aweme"
+            ])
+            
+            if not result:
+                return False
+            
+            # 抖音启动画面Activity名称模式
+            splash_patterns = [
+                "SplashActivity",
+                "LaunchActivity", 
+                "WelcomeActivity",
+                "InitActivity",
+                "StartActivity"
+            ]
+            
+            is_splash = any(pattern in result for pattern in splash_patterns)
+            
+            if is_splash:
+                self.logger.info("检测到抖音在启动画面: %s", result.strip())
+            else:
+                self.logger.debug("抖音当前状态: %s", result.strip())
+            
+            return is_splash
+            
+        except Exception as e:
+            self.logger.error("检查启动画面状态失败: %s", str(e))
+            return False
+
+    def wait_for_douyin_main_interface(self, timeout: int = 30) -> bool:
+        """等待抖音主界面加载完成"""
+        self.logger.info("等待抖音主界面加载完成...")
+        
+        start_time = time.time()
+        check_interval = 2  # 每2秒检查一次
+        splash_detected = False
+        
+        while time.time() - start_time < timeout:
+            elapsed_time = int(time.time() - start_time)
+            
+            # 检查是否还在启动画面
+            if self.is_douyin_in_splash():
+                splash_detected = True
+                self.logger.info("启动画面检测中... (%ds/%ds)", 
+                               elapsed_time, timeout)
+                time.sleep(check_interval)
+                continue
+            
+            # 如果之前检测到启动画面，现在不在了，说明正在加载
+            if splash_detected:
+                self.logger.info("启动画面结束，等待主界面就绪...")
+                time.sleep(3)  # 给主界面一些加载时间
+            
+            # 检查UI是否可获取且包含主界面元素
+            xml_content = self.get_ui_xml()
+            if xml_content and self._is_main_interface_ready(xml_content):
+                self.logger.info("✅ 抖音主界面加载完成")
+                return True
+            
+            self.logger.debug("主界面尚未就绪，继续等待... (%ds/%ds)", 
+                            elapsed_time, timeout)
+            time.sleep(check_interval)
+        
+        self.logger.warning("等待抖音主界面超时")
+        return False
+
+    def _is_main_interface_ready(self, xml_content: str) -> bool:
+        """检查是否为主界面就绪状态"""
+        if not xml_content:
+            return False
+        
+        # 检查主界面特征元素
+        main_indicators = [
+            "我",  # 底部导航栏
+            "推荐",  # 顶部标签
+            "关注",  # 顶部标签
+            "直播",  # 顶部标签
+        ]
+        
+        # 至少要有2个主界面指示元素
+        found_indicators = sum(1 for indicator in main_indicators 
+                              if indicator in xml_content)
+        
+        is_ready = found_indicators >= 2
+        self.logger.debug("主界面指示元素: %d/4, 就绪状态: %s", 
+                         found_indicators, is_ready)
+        
+        return is_ready
+
+    def _try_compressed_dump(self) -> Optional[str]:
+        """尝试压缩dump方法 (Android 7+)"""
+        try:
+            self.logger.debug("尝试压缩dump方法")
+            
+            # 清除旧文件
+            self.execute_command(["shell", "rm", "-f", self.UI_DUMP_PATH])
+            
+            # 使用压缩dump
+            dump_result = self.execute_command([
+                "shell", "uiautomator", "dump", "--compressed", self.UI_DUMP_PATH
+            ])
+            
+            if dump_result is not None and "ERROR:" not in str(dump_result):
+                time.sleep(1)
+                
+                # 读取压缩文件
+                xml_result = self.execute_command([
+                    "shell", "cat", self.UI_DUMP_PATH
+                ])
+                
+                if (xml_result and len(xml_result) > self.MIN_XML_LENGTH and 
+                        "<?xml" in xml_result):
+                    self.logger.debug("压缩dump成功，XML长度: %d", len(xml_result))
+                    return xml_result
+            
+            return None
+            
+        except Exception as e:
+            self.logger.debug("压缩dump失败: %s", str(e))
+            return None
+
+    def _try_stdout_dump(self) -> Optional[str]:
+        """尝试直接输出到stdout的dump方法"""
+        try:
+            self.logger.debug("尝试stdout dump方法")
+            
+            # 直接dump到stdout
+            result = self.execute_command([
+                "exec-out", "uiautomator", "dump", "/dev/tty"
+            ])
+            
+            if result and len(result) > self.MIN_XML_LENGTH:
+                # 清理可能的错误信息
+                if "ERROR:" in result:
+                    # 尝试提取XML部分
+                    xml_start = result.find("<?xml")
+                    if xml_start > 0:
+                        result = result[xml_start:]
+                
+                if "<?xml" in result and "</hierarchy>" in result:
+                    self.logger.debug("stdout dump成功，XML长度: %d", len(result))
+                    return result
+            
+            return None
+            
+        except Exception as e:
+            self.logger.debug("stdout dump失败: %s", str(e))
+            return None

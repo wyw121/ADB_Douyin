@@ -531,3 +531,262 @@ class UIAnalyzer:
             
         except Exception as e:
             self.logger.error("保存分析报告失败: %s", str(e))
+
+    def analyze_bottom_navigation_structure(self):
+        """分析底部导航栏的完整结构"""
+        if not self.elements:
+            self.logger.warning("没有UI元素可供分析")
+            return None
+        
+        screen_width, screen_height = self._get_screen_dimensions()
+        if screen_height == 0:
+            return None
+        
+        # 收集底部导航元素
+        nav_elements = self._collect_bottom_nav_elements(screen_height)
+        if not nav_elements:
+            return None
+        
+        # 构建导航结构
+        nav_structure = self._build_nav_structure(nav_elements, screen_width)
+        
+        self.logger.info("底部导航栏分析结果: %d个按钮, 有效导航栏: %s",
+                         nav_structure['total_buttons'],
+                         nav_structure['is_valid_navigation'])
+        
+        self._log_nav_buttons(nav_structure['buttons'])
+        return nav_structure
+
+    def _collect_bottom_nav_elements(self, screen_height):
+        """收集底部导航区域的元素"""
+        nav_bottom_threshold = screen_height - 150
+        nav_elements = []
+        
+        for element in self.elements:
+            if not (element.bounds and len(element.bounds) >= 4):
+                continue
+            
+            element_top = element.bounds[1]
+            
+            # 检查是否在底部导航区域且可能是导航按钮
+            if (element_top >= nav_bottom_threshold and
+                    self._is_potential_nav_button(element)):
+                nav_elements.append(element)
+        
+        # 按X坐标排序，从左到右
+        nav_elements.sort(key=lambda e: e.bounds[0])
+        return nav_elements
+
+    def _build_nav_structure(self, nav_elements, screen_width):
+        """构建导航栏结构信息"""
+        nav_structure = {
+            'total_buttons': len(nav_elements),
+            'buttons': [],
+            'container_bounds': None,
+            'is_valid_navigation': False
+        }
+        
+        # 构建按钮信息
+        for i, element in enumerate(nav_elements):
+            button_info = self._create_button_info(i, element)
+            nav_structure['buttons'].append(button_info)
+        
+        # 验证和设置容器边界
+        if len(nav_elements) >= 3:
+            nav_structure['is_valid_navigation'] = (
+                self._validate_navigation_layout(nav_elements, screen_width))
+            nav_structure['container_bounds'] = (
+                self._calculate_container_bounds(nav_elements))
+        
+        return nav_structure
+
+    def _create_button_info(self, index, element):
+        """创建按钮信息字典"""
+        return {
+            'index': index,
+            'text': element.text.strip() if element.text else "",
+            'content_desc': (element.content_desc.strip()
+                             if element.content_desc else ""),
+            'bounds': element.bounds,
+            'center': ((element.bounds[0] + element.bounds[2]) // 2,
+                       (element.bounds[1] + element.bounds[3]) // 2),
+            'resource_id': element.resource_id,
+            'class_name': element.class_name,
+            'is_profile_button': self._is_profile_text(element)
+        }
+
+    def _calculate_container_bounds(self, nav_elements):
+        """计算导航栏容器边界"""
+        if not nav_elements:
+            return None
+        
+        min_x = min(e.bounds[0] for e in nav_elements)
+        max_x = max(e.bounds[2] for e in nav_elements)
+        min_y = min(e.bounds[1] for e in nav_elements)
+        max_y = max(e.bounds[3] for e in nav_elements)
+        return (min_x, min_y, max_x, max_y)
+
+    def _log_nav_buttons(self, buttons):
+        """记录导航按钮详细信息"""
+        for i, button in enumerate(buttons):
+            profile_marker = " [我按钮]" if button['is_profile_button'] else ""
+            self.logger.debug("导航按钮%d: 文本='%s', 描述='%s', 中心=%s%s",
+                              i + 1, button['text'], button['content_desc'],
+                              button['center'], profile_marker)
+
+    def _is_potential_nav_button(self, element):
+        """判断元素是否可能是导航按钮"""
+        # 检查尺寸（导航按钮通常有合理的尺寸）
+        if element.bounds:
+            width = element.bounds[2] - element.bounds[0]
+            height = element.bounds[3] - element.bounds[1]
+            if width < 20 or width > 200 or height < 20 or height > 100:
+                return False
+        
+        # 检查类名（常见的按钮类）
+        button_classes = ['TextView', 'Button', 'ImageView', 'View',
+                          'LinearLayout', 'RelativeLayout', 'FrameLayout']
+        has_button_class = any(cls in element.class_name
+                               for cls in button_classes)
+        
+        if not has_button_class:
+            return False
+        
+        # 检查是否可点击或有可点击的子元素
+        if element.is_clickable_element():
+            return True
+        
+        # 检查是否有可点击的子元素（导航按钮可能是容器）
+        if self._has_clickable_children(element):
+            return True
+        
+        # 检查是否有文本或描述
+        has_text = (element.text and element.text.strip()) or \
+                   (element.content_desc and element.content_desc.strip())
+        
+        return has_text
+
+    def _has_clickable_children(self, parent_element):
+        """检查元素是否有可点击的子元素"""
+        if not parent_element.bounds:
+            return False
+        
+        parent_bounds = parent_element.bounds
+        
+        # 查找在父元素范围内的可点击子元素
+        for element in self.elements:
+            if not element.bounds or element == parent_element:
+                continue
+            
+            # 检查是否在父元素内部
+            if (element.bounds[0] >= parent_bounds[0] and
+                element.bounds[1] >= parent_bounds[1] and
+                element.bounds[2] <= parent_bounds[2] and
+                element.bounds[3] <= parent_bounds[3]):
+                
+                if element.is_clickable_element():
+                    return True
+        
+        return False
+
+    def _validate_navigation_layout(self, nav_elements, screen_width):
+        """验证导航栏布局是否合理"""
+        if len(nav_elements) < 3:
+            return False
+        
+        # 获取有效的导航按钮（去重，按位置分组）
+        unique_buttons = self._get_unique_nav_buttons(nav_elements)
+        
+        if len(unique_buttons) < 3:
+            return False
+        
+        # 检查按钮分布是否相对均匀
+        centers = [(e.bounds[0] + e.bounds[2]) // 2 for e in unique_buttons]
+        centers.sort()  # 确保从左到右排序
+        
+        # 计算相邻按钮间距
+        spacings = []
+        for i in range(1, len(centers)):
+            spacing = centers[i] - centers[i-1]
+            if spacing > 50:  # 只考虑明显分离的按钮
+                spacings.append(spacing)
+        
+        if len(spacings) < 2:  # 至少要有2个有意义的间距
+            return False
+        
+        # 检查间距是否相对合理（不要求完全均匀）
+        min_spacing = min(spacings)
+        max_spacing = max(spacings)
+        
+        if min_spacing <= 0 or max_spacing > min_spacing * 5:  # 放宽到5倍
+            return False
+        
+        # 检查覆盖屏幕宽度的比例
+        total_width = centers[-1] - centers[0]
+        coverage = total_width / screen_width
+        
+        return coverage > 0.3  # 降低到30%的屏幕宽度
+
+    def _get_unique_nav_buttons(self, nav_elements):
+        """获取唯一的导航按钮（按位置去重）"""
+        unique_buttons = []
+        seen_positions = set()
+        
+        for element in nav_elements:
+            if not element.bounds:
+                continue
+            
+            # 使用中心点作为唯一标识（允许5像素误差）
+            center_x = (element.bounds[0] + element.bounds[2]) // 2
+            center_y = (element.bounds[1] + element.bounds[3]) // 2
+            
+            # 检查是否已有相近位置的按钮
+            is_duplicate = False
+            for seen_x, seen_y in seen_positions:
+                if abs(center_x - seen_x) <= 5 and abs(center_y - seen_y) <= 5:
+                    is_duplicate = True
+                    break
+            
+            if not is_duplicate:
+                seen_positions.add((center_x, center_y))
+                unique_buttons.append(element)
+        
+        return unique_buttons
+
+    def verify_profile_button_in_navigation(self):
+        """验证'我'按钮是否确实在导航栏中"""
+        nav_structure = self.analyze_bottom_navigation_structure()
+        
+        if not nav_structure or not nav_structure['is_valid_navigation']:
+            self.logger.warning("未检测到有效的底部导航栏")
+            return False, None
+        
+        # 查找"我"按钮
+        profile_button = None
+        for button in nav_structure['buttons']:
+            if button['is_profile_button']:
+                profile_button = button
+                break
+        
+        if not profile_button:
+            self.logger.warning("在导航栏中未找到'我'按钮")
+            return False, None
+        
+        # 验证"我"按钮是否与其他导航按钮在同一结构中
+        total_buttons = nav_structure['total_buttons']
+        profile_index = profile_button['index']
+        
+        # 检查是否有足够的导航按钮
+        if total_buttons < 3:
+            self.logger.warning("导航按钮数量不足(%d < 3)", total_buttons)
+            return False, None
+        
+        # 检查"我"按钮的位置是否合理（通常在右侧）
+        if profile_index < total_buttons / 2:
+            self.logger.warning("'我'按钮位置异常(索引:%d, 总数:%d)", 
+                              profile_index, total_buttons)
+        
+        self.logger.info("验证通过: '我'按钮在有效导航栏中(位置:%d/%d)", 
+                        profile_index + 1, total_buttons)
+        
+        return True, profile_button

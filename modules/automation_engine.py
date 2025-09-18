@@ -60,34 +60,36 @@ class AutomationEngine:
         return False
         
     def wait_for_main_interface(self) -> bool:
-        """等待抖音主界面完全加载"""
+        """等待抖音主界面完全加载，包含启动画面检测"""
         self.logger.info("等待抖音主界面加载...")
         
-        # 先等待一段时间让应用启动
-        time.sleep(5)
-        
-        # 循环检查是否到达主界面（有底部导航栏的"我"按钮）
-        for attempt in range(15):  # 最多等待30秒
-            self.logger.info("检查主界面加载状态... (%d/15)", attempt + 1)
-            
+        # 使用ADB接口的智能等待方法
+        if self.adb.wait_for_douyin_main_interface(timeout=30):
+            # 主界面加载完成后，尝试检测和缓存"我"按钮位置
             if self.get_current_ui():
-                # 检查是否有底部导航栏的"我"按钮
-                if self.ui_analyzer.has_bottom_navigation_profile_button():
-                    # 缓存"我"按钮位置供后续导航使用
-                    self.cached_profile_button_pos = (
-                        self.ui_analyzer.get_profile_button_position())
-                    self.logger.info("✅ 检测到底部导航栏'我'按钮，主界面加载完成")
+                # 使用新的验证方法检测"我"按钮
+                is_valid, profile_button = (
+                    self.ui_analyzer.verify_profile_button_in_navigation())
+                
+                if is_valid and profile_button:
+                    self.cached_profile_button_pos = profile_button['center']
+                    self.logger.info("✅ 验证并缓存了导航栏'我'按钮位置: %s",
+                                   self.cached_profile_button_pos)
                     return True
                 else:
-                    self.logger.debug("底部导航栏'我'按钮未找到，继续等待...")
-            else:
-                self.logger.debug("UI获取失败，继续等待...")
+                    # 尝试旧方法作为后备
+                    if self.ui_analyzer.has_bottom_navigation_profile_button():
+                        self.cached_profile_button_pos = (
+                            self.ui_analyzer.get_profile_button_position())
+                        self.logger.info("✅ 使用后备方法缓存'我'按钮位置")
+                        return True
             
-            time.sleep(2)  # 每2秒检查一次
-        
-        # 如果检查失败，给出警告但继续执行
-        self.logger.warning("⚠️ 主界面检查超时，但继续执行流程")
-        return True
+            # 即使无法缓存按钮位置，主界面已加载完成
+            self.logger.info("✅ 主界面已加载，但未能缓存'我'按钮位置")
+            return True
+        else:
+            self.logger.warning("⚠️ 主界面加载超时，但继续执行流程")
+            return True
 
     def stop_douyin(self) -> bool:
         """停止抖音应用"""
@@ -206,10 +208,16 @@ class AutomationEngine:
         for attempt in range(self.max_retries):
             self.logger.info("第 %d 次尝试导航", attempt + 1)
             
-            # 策略1: 使用缓存的"我"按钮位置（最优先）
-            if self.cached_profile_button_pos:
-                self.logger.info("使用缓存的'我'按钮位置: %s", 
-                                self.cached_profile_button_pos)
+            # 策略1: 验证导航栏结构并使用安全坐标
+            if self._try_verified_navigation():
+                if self._verify_profile_page():
+                    return True
+            
+            # 策略2: 使用缓存的"我"按钮位置（需要验证安全性）
+            if (self.cached_profile_button_pos and 
+                    self._verify_cached_coordinate_safety()):
+                self.logger.info("使用验证过的缓存坐标: %s",
+                               self.cached_profile_button_pos)
                 success = self.adb.tap(self.cached_profile_button_pos[0],
                                       self.cached_profile_button_pos[1])
                 if success:
@@ -421,3 +429,103 @@ class AutomationEngine:
         self.ui_analyzer.save_analysis_report(report_filename)
         
         return True
+
+    def _try_verified_navigation(self) -> bool:
+        """尝试使用验证的导航栏检测"""
+        if not self.get_current_ui():
+            return False
+        
+        # 验证'我'按钮是否在导航栏结构中
+        is_valid, profile_button = (
+            self.ui_analyzer.verify_profile_button_in_navigation())
+        
+        if not is_valid or not profile_button:
+            self.logger.debug("未找到有效的导航栏'我'按钮")
+            return False
+        
+        position = profile_button['center']
+        
+        # 验证坐标安全性
+        if not self._verify_coordinate_safety(position):
+            self.logger.warning("检测到的坐标未通过安全验证")
+            return False
+        
+        # 缓存验证过的坐标
+        self.cached_profile_button_pos = position
+        self.logger.info("使用验证的导航栏'我'按钮: %s", position)
+        
+        return self.adb.tap(position[0], position[1])
+
+    def _verify_coordinate_safety(self, position):
+        """验证坐标的安全性"""
+        if not position or len(position) != 2:
+            return False
+        
+        x, y = position
+        
+        # 检查坐标是否在合理范围内
+        if x < 0 or y < 0 or x > 2000 or y > 3000:
+            self.logger.warning("坐标超出合理范围: (%d, %d)", x, y)
+            return False
+        
+        # 检查是否在底部导航区域（动态计算）
+        screen_size = self.adb.get_screen_size()
+        if screen_size:
+            _, screen_height = screen_size
+            nav_threshold = screen_height - 200  # 底部200像素区域
+            if y < nav_threshold:
+                self.logger.warning("坐标不在底部导航区域: y=%d (阈值:%d)",
+                                  y, nav_threshold)
+                return False
+        else:
+            # 如果无法获取屏幕尺寸，使用固定阈值
+            if y < 1400:
+                self.logger.warning("坐标不在底部导航区域: y=%d", y)
+                return False
+        
+        return True
+
+    def _verify_cached_coordinate_safety(self):
+        """验证缓存坐标的安全性"""
+        if not self.cached_profile_button_pos:
+            return False
+        
+        # 基本坐标验证
+        if not self._verify_coordinate_safety(self.cached_profile_button_pos):
+            self.logger.warning("缓存坐标未通过基本安全检查")
+            return False
+        
+        # 尝试与当前导航栏结构比较
+        try:
+            if self.get_current_ui():
+                nav_structure = (
+                    self.ui_analyzer.analyze_bottom_navigation_structure())
+                
+                if nav_structure and nav_structure['is_valid_navigation']:
+                    container_bounds = nav_structure['container_bounds']
+                    if container_bounds:
+                        return self._check_coordinate_in_container(
+                            self.cached_profile_button_pos, container_bounds)
+        except (AttributeError, TypeError, ValueError) as e:
+            self.logger.warning("验证缓存坐标时出错: %s", str(e))
+        
+        # 如果无法验证结构，至少确保基本坐标合理
+        return True
+
+    def _check_coordinate_in_container(self, position, container_bounds):
+        """检查坐标是否在容器范围内"""
+        x, y = position
+        min_x, min_y, max_x, max_y = container_bounds
+        
+        # 允许一定的容差（扩展边界20像素）
+        tolerance = 20
+        in_bounds = (min_x - tolerance <= x <= max_x + tolerance and
+                     min_y - tolerance <= y <= max_y + tolerance)
+        
+        if in_bounds:
+            self.logger.debug("缓存坐标在导航容器范围内")
+        else:
+            self.logger.warning("缓存坐标(%d,%d)不在导航容器(%s)范围内",
+                               x, y, container_bounds)
+        
+        return in_bounds
