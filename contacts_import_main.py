@@ -145,40 +145,62 @@ def main():
     
     print("✓ 导入已触发")
     
-    # 步骤7: UI交互处理
+    # 步骤7: UI交互处理（智能版本）
     print(f"\n步骤7: 处理UI交互...")
-    print("正在分析设备屏幕...")
+    print("正在智能分析设备屏幕...")
     
     max_attempts = 10
+    ui_interaction_successful = False
+    
     for attempt in range(max_attempts):
         print(f"尝试 {attempt + 1}/{max_attempts}...")
         
-        # 分析当前屏幕
+        # 首先尝试智能权限处理
+        if automation.smart_handle_permission_dialog():
+            print("✓ 智能权限处理成功")
+            ui_interaction_successful = True
+            
+            # 等待一下再继续检测
+            import time
+            time.sleep(2)
+            continue
+        
+        # 如果智能权限处理没有成功，使用传统方法
         analysis = ui_detector.analyze_current_screen()
         
         if not analysis['ui_captured']:
             print("⚠️  UI捕获失败，重试中...")
+            import time
+            time.sleep(2)
             continue
+        
+        # 检查是否还有需要处理的对话框
+        has_dialog = (analysis.get('import_dialog', {}).get('found', False) or
+                     analysis.get('permission_dialog', {}).get('found', False))
+        
+        if not has_dialog:
+            # 没有对话框了，可能导入已完成
+            print("✓ 未检测到需要处理的对话框，导入可能已完成")
+            ui_interaction_successful = True
+            break
         
         print("UI分析结果:")
         print(f"- 导入对话框: {'是' if analysis['import_dialog']['found'] else '否'}")
         print(f"- 权限对话框: {'是' if analysis['permission_dialog']['found'] else '否'}")
         print(f"- 通讯录应用: {'是' if analysis['contacts_app']['found'] else '否'}")
         
-        # 执行自动化操作
+        # 执行传统自动化操作
         if automation.perform_automated_import(analysis):
-            print("✓ 自动化操作执行成功")
-            
-            # 检查是否完成
-            if (not analysis['permission_dialog']['found'] and
-                not analysis['import_dialog']['found']):
-                print("✓ 导入流程已完成")
-                break
+            print("✓ 传统自动化操作执行成功")
+            ui_interaction_successful = True
         else:
             print("⚠️  自动化操作未执行")
         
         import time
         time.sleep(2)
+    
+    if not ui_interaction_successful:
+        print("⚠️  UI交互处理可能未完全成功，请手动检查设备状态")
     
     # 步骤8: 清理临时文件
     print(f"\n步骤8: 清理临时文件...")
