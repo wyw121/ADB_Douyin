@@ -109,31 +109,76 @@ class ContactsUIDetector:
             Optional[str]: UI XML字符串，失败时返回None
         """
         try:
-            cmd = [self.adb_path]
-            if self.device_id:
-                cmd.extend(["-s", self.device_id])
+            # 方法1: 直接输出
+            xml_content = self._try_direct_dump()
+            if xml_content:
+                return xml_content
             
-            cmd.extend(["exec-out", "uiautomator", "dump", "/dev/tty"])
+            # 方法2: 文件方式
+            xml_content = self._try_file_dump()
+            if xml_content:
+                return xml_content
             
-            result = subprocess.run(cmd, capture_output=True, text=True,
-                                  timeout=15, check=False)
-            
-            if result.returncode == 0 and result.stdout.strip():
-                self.detection_stats['ui_dumps_captured'] += 1
-                return result.stdout.strip()
-            else:
-                self.logger.warning("UI dump failed: %s", result.stderr)
-                self.detection_stats['detection_errors'] += 1
-                return None
-                
-        except subprocess.TimeoutExpired:
-            self.logger.error("UI dump timeout")
+            self.logger.warning("All UI dump methods failed")
             self.detection_stats['detection_errors'] += 1
             return None
+                
         except Exception as e:
             self.logger.error("UI dump failed: %s", str(e))
             self.detection_stats['detection_errors'] += 1
             return None
+    
+    def _try_direct_dump(self) -> Optional[str]:
+        """尝试直接输出方式获取UI"""
+        cmd = [self.adb_path]
+        if self.device_id:
+            cmd.extend(["-s", self.device_id])
+        cmd.extend(["exec-out", "uiautomator", "dump", "/dev/tty"])
+        
+        for encoding in ['utf-8', 'gbk', 'gb2312']:
+            try:
+                result = subprocess.run(
+                    cmd, capture_output=True, encoding=encoding,
+                    errors='ignore', timeout=15, check=False
+                )
+                
+                if self._is_valid_xml(result.stdout):
+                    self.detection_stats['ui_dumps_captured'] += 1
+                    return result.stdout.strip()
+            except (subprocess.TimeoutExpired, UnicodeDecodeError):
+                continue
+        return None
+    
+    def _try_file_dump(self) -> Optional[str]:
+        """尝试文件方式获取UI"""
+        try:
+            base_cmd = [self.adb_path]
+            if self.device_id:
+                base_cmd.extend(["-s", self.device_id])
+            
+            # 保存到设备文件
+            dump_cmd = base_cmd + ['shell', 'uiautomator', 'dump', 
+                                   '/sdcard/ui_dump.xml']
+            subprocess.run(dump_cmd, timeout=10, check=False)
+            
+            # 读取文件内容
+            read_cmd = base_cmd + ['shell', 'cat', '/sdcard/ui_dump.xml']
+            result = subprocess.run(
+                read_cmd, capture_output=True, encoding='utf-8',
+                errors='ignore', timeout=10, check=False
+            )
+            
+            if self._is_valid_xml(result.stdout):
+                self.detection_stats['ui_dumps_captured'] += 1
+                return result.stdout.strip()
+        except Exception as e:
+            self.logger.warning("File method failed: %s", str(e))
+        return None
+    
+    def _is_valid_xml(self, content: str) -> bool:
+        """检查内容是否为有效XML"""
+        return (content and content.strip() and 
+                '<?xml' in content and 'hierarchy' in content)
     
     def parse_ui_elements(self, ui_xml: str) -> List[Dict[str, Any]]:
         """
