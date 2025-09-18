@@ -227,10 +227,14 @@ END:VCARD
             self.logger.error("Import process failed: %s", str(e))
             return False
     
-    def _handle_ui_interactions(self, timeout: int = 30) -> bool:
-        """处理UI交互"""
+    def _handle_ui_interactions(self, timeout: int = 60) -> bool:
+        """处理UI交互（增强版，支持多种对话框类型）"""
         start_time = time.time()
         interactions_handled = 0
+        last_ui_state = ""
+        ui_state_repeat_count = 0
+        
+        self.logger.info("Starting UI interaction handling...")
         
         while time.time() - start_time < timeout:
             try:
@@ -240,29 +244,99 @@ END:VCARD
                 
                 if not analysis['ui_captured']:
                     self.logger.warning("Failed to capture UI, retrying...")
-                    time.sleep(1)
+                    time.sleep(2)
                     continue
                 
-                # 执行自动化操作
-                if self.automation.perform_automated_import(analysis):
-                    interactions_handled += 1
-                    self.workflow_stats['automation_actions'] += 1
-                    
-                    # 检查是否完成
-                    if self._is_import_completed(analysis):
-                        self.logger.info("Import completed successfully")
-                        return True
+                # 检查UI状态是否重复
+                current_ui_state = self._get_ui_state_signature(analysis)
+                if current_ui_state == last_ui_state:
+                    ui_state_repeat_count += 1
+                    if ui_state_repeat_count > 3:
+                        self.logger.warning("UI state repeated too many times")
+                        break
+                else:
+                    ui_state_repeat_count = 0
+                    last_ui_state = current_ui_state
                 
-                # 等待UI变化
-                time.sleep(2)
+                # 记录推荐操作
+                if analysis.get('recommended_actions'):
+                    self.logger.info("Recommended actions: %s",
+                                   '; '.join(analysis['recommended_actions']))
+                
+                # 执行自动化操作
+                action_taken = False
+                
+                # 1. 处理应用选择器
+                if analysis.get('app_selector', {}).get('found'):
+                    self.logger.info("Handling app selector...")
+                    if self.automation.handle_app_selector(analysis):
+                        action_taken = True
+                        interactions_handled += 1
+                
+                # 2. 处理权限对话框
+                elif analysis.get('permission_dialog', {}).get('found'):
+                    perm = analysis['permission_dialog']
+                    step_info = ""
+                    if perm.get('current_step'):
+                        step_info = f" ({perm['current_step']}/{perm['total_steps']})"
+                    
+                    self.logger.info("Handling permission dialog%s...", step_info)
+                    if self.automation.handle_permission_dialog_advanced(analysis):
+                        action_taken = True
+                        interactions_handled += 1
+                
+                # 3. 处理VCard导入对话框
+                elif analysis.get('vcard_import_dialog', {}).get('found'):
+                    self.logger.info("Handling VCard import dialog...")
+                    if self.automation.handle_vcard_import_dialog(analysis):
+                        action_taken = True
+                        interactions_handled += 1
+                
+                # 4. 处理普通导入对话框
+                elif analysis.get('import_dialog', {}).get('found'):
+                    self.logger.info("Handling import dialog...")
+                    if self.automation.handle_import_dialog(
+                        analysis.get('clickable_elements', [])
+                    ):
+                        action_taken = True
+                        interactions_handled += 1
+                
+                # 5. 检查是否已完成导入
+                elif analysis.get('contacts_app', {}).get('found'):
+                    self.logger.info("Detected contacts app, import may be complete")
+                    return True
+                
+                if action_taken:
+                    self.workflow_stats['automation_actions'] += 1
+                    # 操作后等待UI更新
+                    time.sleep(3)
+                else:
+                    # 没有找到可操作的元素，短暂等待
+                    time.sleep(2)
                 
             except Exception as e:
                 self.logger.error("UI interaction error: %s", str(e))
-                time.sleep(1)
+                time.sleep(2)
         
-        self.logger.warning("UI interaction timeout after %d interactions", 
-                          interactions_handled)
-        return interactions_handled > 0
+        if interactions_handled > 0:
+            self.logger.info("UI interactions completed with %d actions",
+                           interactions_handled)
+            return True
+        else:
+            self.logger.warning("UI interaction timeout with no actions taken")
+            return False
+    
+    def _get_ui_state_signature(self, analysis: Dict[str, Any]) -> str:
+        """获取UI状态签名用于检测重复状态"""
+        signature_parts = []
+        
+        for dialog_type in ['app_selector', 'permission_dialog',
+                           'vcard_import_dialog', 'import_dialog',
+                           'contacts_app']:
+            if analysis.get(dialog_type, {}).get('found'):
+                signature_parts.append(dialog_type)
+        
+        return '_'.join(signature_parts) if signature_parts else 'unknown'
     
     def _is_import_completed(self, analysis: Dict[str, Any]) -> bool:
         """检查导入是否完成"""
@@ -322,12 +396,19 @@ END:VCARD
             contacts = self.converter.convert_txt_to_contacts(txt_file_path)
             stats = self.converter.get_conversion_statistics()
             
+            # 计算预期成功率
+            estimated_success_rate = 0.0
+            if stats['total_input'] > 0:
+                estimated_success_rate = (stats['valid_numbers'] / 
+                                         stats['total_input'] * 100)
+            
             validation_result.update({
                 'valid': len(contacts) > 0,
                 'total_lines': stats['total_input'],
                 'valid_contacts': stats['valid_numbers'],
                 'invalid_lines': stats['invalid_numbers'],
-                'duplicate_numbers': stats['duplicates_removed']
+                'duplicate_numbers': stats['duplicates_removed'],
+                'estimated_success_rate': estimated_success_rate
             })
             
             if stats['valid_numbers'] == 0:

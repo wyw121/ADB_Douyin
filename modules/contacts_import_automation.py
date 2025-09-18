@@ -48,132 +48,26 @@ class ContactsImportAutomation:
             'successful_automations': 0
         }
         
-        # 常见按钮文本模式（升级版，支持更复杂的权限对话框）
+        # 常见按钮文本模式
         self.button_patterns = {
             'confirm': [
                 r'^确定$', r'^确认$', r'^导入$', r'^OK$', 
                 r'^Accept$', r'^Import$', r'^Confirm$'
             ],
             'allow': [
-                r'^允许$', r'^同意$', r'^Allow$', r'^Grant$', 
-                r'^Accept$', r'^Permit$', r'.*允许.*', r'.*Allow.*'
+                r'^允许$', r'^始终允许$', r'^同意$', r'^Allow$',
+                r'^Always Allow$', r'^Grant$', r'^Accept$', r'^Permit$'
             ],
-            'allow_always': [
-                r'^始终.*允许$', r'^Always.*Allow$', r'^Allow.*Always$',
-                r'始终允许', r'仅在使用应用时允许', r'Allow all the time'
+            'deny': [
+                r'^取消$', r'^禁止$', r'^拒绝$', r'^Cancel$',
+                r'^Deny$', r'^Refuse$'
             ],
-            'cancel': [
-                r'^取消$', r'^Cancel$', r'^Deny$', r'^Refuse$', r'^禁止$'
+            'contacts_app': [
+                r'联系人', r'通讯录', r'Contact', r'电话本'
             ]
         }
         
         self.logger.info("ContactsImportAutomation initialized")
-    
-    def parse_permission_dialog_xml(self, ui_xml: str) -> Dict[str, Any]:
-        """
-        专门解析权限对话框的XML，精确定位按钮
-        
-        Args:
-            ui_xml: UI XML字符串
-            
-        Returns:
-            Dict: 解析结果，包含按钮位置和类型
-        """
-        try:
-            import xml.etree.ElementTree as ET
-            root = ET.fromstring(ui_xml)
-            
-            result = {
-                'permission_type': '',
-                'step_info': '',
-                'buttons': [],
-                'recommended_button': None
-            }
-            
-            # 递归查找所有元素
-            def find_elements(node):
-                # 查找权限信息
-                text = node.get('text', '')
-                if '允许' in text and ('访问' in text or '权限' in text):
-                    result['permission_type'] = text
-                
-                # 查找步骤信息
-                if re.search(r'\d+/\d+', text):
-                    result['step_info'] = text
-                
-                # 查找按钮
-                if (node.get('clickable') == 'true' and 
-                    node.get('class') == 'android.widget.Button'):
-                    
-                    button_info = {
-                        'text': text,
-                        'bounds': node.get('bounds', ''),
-                        'resource_id': node.get('resource-id', ''),
-                        'button_type': self._classify_button(text)
-                    }
-                    result['buttons'].append(button_info)
-                
-                # 递归处理子节点
-                for child in node:
-                    find_elements(child)
-            
-            find_elements(root)
-            
-            # 确定推荐点击的按钮
-            result['recommended_button'] = self._get_recommended_button(
-                result['buttons']
-            )
-            
-            return result
-            
-        except Exception as e:
-            self.logger.error("Permission dialog XML parsing failed: %s", str(e))
-            return {}
-    
-    def _classify_button(self, button_text: str) -> str:
-        """
-        分类按钮类型
-        
-        Args:
-            button_text: 按钮文本
-            
-        Returns:
-            str: 按钮类型
-        """
-        text = button_text.lower()
-        
-        if '始终' in text and '允许' in text:
-            return 'always_allow'
-        elif '允许' in text:
-            return 'allow'
-        elif '禁止' in text or '拒绝' in text:
-            return 'deny'
-        elif '取消' in text:
-            return 'cancel'
-        elif '确定' in text:
-            return 'confirm'
-        else:
-            return 'unknown'
-    
-    def _get_recommended_button(self, buttons: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
-        """
-        获取推荐点击的按钮
-        
-        Args:
-            buttons: 按钮列表
-            
-        Returns:
-            Optional[Dict]: 推荐的按钮，如果没有返回None
-        """
-        # 按优先级排序
-        priority_order = ['always_allow', 'allow', 'confirm']
-        
-        for button_type in priority_order:
-            for button in buttons:
-                if button['button_type'] == button_type:
-                    return button
-        
-        return None
     
     def _find_adb_executable(self) -> str:
         """查找ADB可执行文件路径"""
@@ -272,7 +166,7 @@ class ContactsImportAutomation:
     
     def handle_permission_dialog(self, ui_elements: List[Dict[str, Any]]) -> bool:
         """
-        处理权限请求对话框（智能版本，支持多步骤权限）
+        处理权限请求对话框
         
         Args:
             ui_elements: UI元素列表
@@ -281,31 +175,20 @@ class ContactsImportAutomation:
             bool: 处理是否成功
         """
         try:
-            # 检查是否是多步骤权限对话框
-            is_multi_step = self._is_multi_step_permission_dialog(ui_elements)
-            
-            # 优先查找"始终允许"按钮
+            # 查找允许按钮
             allow_button = self._find_button_by_patterns(
-                ui_elements, self.button_patterns['allow_always']
+                ui_elements, self.button_patterns['allow']
             )
             
-            # 如果没找到"始终允许"，查找普通"允许"按钮
-            if not allow_button:
-                allow_button = self._find_button_by_patterns(
-                    ui_elements, self.button_patterns['allow']
-                )
-            
             if allow_button:
-                button_text = allow_button.get('text', '未知按钮')
-                self.logger.info(f"Found permission button: '{button_text}', clicking...")
+                self.logger.info("Found permission allow button, clicking...")
                 
                 if self.click_element_by_bounds(allow_button['bounds']):
                     self.automation_stats['permissions_granted'] += 1
                     self.automation_stats['dialogs_handled'] += 1
                     
-                    # 如果是多步骤权限，等待更长时间
-                    wait_time = 2 if is_multi_step else 1
-                    time.sleep(wait_time)
+                    # 等待对话框消失
+                    time.sleep(1)
                     
                     self.logger.info("Permission dialog handled successfully")
                     return True
@@ -320,23 +203,6 @@ class ContactsImportAutomation:
             self.logger.error("Permission dialog handling failed: %s", str(e))
             self.automation_stats['automation_errors'] += 1
             return False
-    
-    def _is_multi_step_permission_dialog(self, ui_elements: List[Dict[str, Any]]) -> bool:
-        """
-        检查是否是多步骤权限对话框
-        
-        Args:
-            ui_elements: UI元素列表
-            
-        Returns:
-            bool: 是否是多步骤权限对话框
-        """
-        for element in ui_elements:
-            text = element.get('text', '')
-            # 查找类似"1/2"、"2/2"的文本
-            if re.search(r'\d+/\d+', text):
-                return True
-        return False
     
     def handle_import_dialog(self, ui_elements: List[Dict[str, Any]]) -> bool:
         """
@@ -469,94 +335,127 @@ class ContactsImportAutomation:
         except Exception:
             return False
     
-    def smart_handle_permission_dialog(self) -> bool:
+    def handle_app_selector(self, analysis_result: Dict[str, Any]) -> bool:
         """
-        智能处理权限对话框（基于实际XML解析）
+        处理应用选择器对话框
         
+        Args:
+            analysis_result: UI分析结果
+            
         Returns:
             bool: 处理是否成功
         """
         try:
-            # 获取当前UI XML
-            ui_xml = self._capture_ui_xml()
-            if not ui_xml:
-                self.logger.error("Failed to capture UI XML")
+            app_selector = analysis_result.get('app_selector', {})
+            
+            if not app_selector.get('found'):
                 return False
             
-            # 解析权限对话框
-            dialog_info = self.parse_permission_dialog_xml(ui_xml)
+            contacts_option = app_selector.get('contacts_option')
             
-            if not dialog_info or not dialog_info.get('buttons'):
-                self.logger.warning("No permission dialog or buttons found")
-                return False
+            if contacts_option:
+                self.logger.info("Found contacts option in app selector")
+                if self.click_element_by_bounds(contacts_option['bounds']):
+                    self.automation_stats['dialogs_handled'] += 1
+                    time.sleep(2)  # 等待应用选择完成
+                    self.logger.info("App selector handled successfully")
+                    return True
             
-            # 记录发现的信息
-            if dialog_info.get('permission_type'):
-                self.logger.info(f"Permission type: {dialog_info['permission_type']}")
-            
-            if dialog_info.get('step_info'):
-                self.logger.info(f"Step info: {dialog_info['step_info']}")
-            
-            # 获取推荐按钮
-            recommended_button = dialog_info.get('recommended_button')
-            
-            if not recommended_button:
-                self.logger.error("No recommended button found")
-                return False
-            
-            # 点击推荐按钮
-            button_text = recommended_button.get('text', '未知')
-            bounds = recommended_button.get('bounds', '')
-            
-            self.logger.info(f"Clicking recommended button: '{button_text}'")
-            
-            if self.click_element_by_bounds(bounds):
-                self.automation_stats['permissions_granted'] += 1
+            # 如果没有明确的通讯录选项，尝试点击屏幕中央
+            self.logger.info("No specific contacts option found, trying center")
+            if self.click_coordinate(360, 1000):  # 基于我们的测试经验
                 self.automation_stats['dialogs_handled'] += 1
-                
-                # 等待对话框处理
                 time.sleep(2)
-                
-                self.logger.info("Smart permission dialog handled successfully")
                 return True
-            else:
-                self.logger.error("Failed to click recommended button")
-                return False
-                
+            
+            return False
+            
         except Exception as e:
-            self.logger.error("Smart permission handling failed: %s", str(e))
+            self.logger.error("App selector handling failed: %s", str(e))
             self.automation_stats['automation_errors'] += 1
             return False
     
-    def _capture_ui_xml(self) -> Optional[str]:
+    def handle_permission_dialog_advanced(self, analysis_result: Dict) -> bool:
         """
-        捕获当前UI XML
+        处理权限请求对话框（增强版，支持多步权限）
         
+        Args:
+            analysis_result: UI分析结果
+            
         Returns:
-            Optional[str]: UI XML字符串
+            bool: 处理是否成功
         """
         try:
-            cmd = [self.adb_path]
-            if self.device_id:
-                cmd.extend(["-s", self.device_id])
+            perm_dialog = analysis_result.get('permission_dialog', {})
             
-            cmd.extend(["exec-out", "uiautomator", "dump", "/dev/tty"])
+            if not perm_dialog.get('found'):
+                return False
             
-            result = subprocess.run(cmd, capture_output=True, text=True,
-                                  timeout=15, check=False)
+            allow_button = perm_dialog.get('allow_button')
             
-            if result.returncode == 0 and result.stdout.strip():
-                return result.stdout.strip()
-            else:
-                return None
+            if allow_button:
+                step_info = ""
+                if perm_dialog.get('current_step'):
+                    step_info = (f" (step {perm_dialog['current_step']}/"
+                                 f"{perm_dialog['total_steps']})")
                 
+                self.logger.info("Found permission allow button%s", step_info)
+                
+                if self.click_element_by_bounds(allow_button['bounds']):
+                    self.automation_stats['permissions_granted'] += 1
+                    self.automation_stats['dialogs_handled'] += 1
+                    time.sleep(2)  # 等待权限处理完成
+                    
+                    self.logger.info("Permission dialog handled successfully")
+                    return True
+            
+            return False
+            
         except Exception as e:
-            self.logger.error("UI XML capture failed: %s", str(e))
-            return None
-
+            self.logger.error("Advanced permission dialog handling failed: %s",
+                              str(e))
+            self.automation_stats['automation_errors'] += 1
+            return False
+    
+    def handle_vcard_import_dialog(self, analysis_result: Dict[str, Any]) -> bool:
+        """
+        处理VCard导入确认对话框
+        
+        Args:
+            analysis_result: UI分析结果
+            
+        Returns:
+            bool: 处理是否成功
+        """
+        try:
+            vcard_dialog = analysis_result.get('vcard_import_dialog', {})
+            
+            if not vcard_dialog.get('found'):
+                return False
+            
+            confirm_button = vcard_dialog.get('confirm_button')
+            
+            if confirm_button:
+                self.logger.info("Found VCard import confirm button")
+                
+                if self.click_element_by_bounds(confirm_button['bounds']):
+                    self.automation_stats['import_confirmations'] += 1
+                    self.automation_stats['dialogs_handled'] += 1
+                    time.sleep(3)  # 等待导入开始
+                    
+                    self.logger.info("VCard import dialog handled successfully")
+                    return True
+            
+            return False
+            
+        except Exception as e:
+            self.logger.error("VCard import dialog handling failed: %s", str(e))
+            self.automation_stats['automation_errors'] += 1
+            return False
+    
     def perform_automated_import(self, analysis_result: Dict[str, Any]) -> bool:
         """
-        执行自动化导入流程
+        执行自动化导入流程（增强版）
         
         Args:
             analysis_result: UI分析结果
@@ -567,42 +466,99 @@ class ContactsImportAutomation:
         try:
             success = False
             
-            # 处理权限对话框
+            # 1. 处理应用选择器
+            if analysis_result.get('app_selector', {}).get('found'):
+                self.logger.info("Handling app selector...")
+                success = self.handle_app_selector(analysis_result)
+                if success:
+                    return success
+            
+            # 2. 处理权限对话框（增强版）
             if analysis_result.get('permission_dialog', {}).get('found'):
                 self.logger.info("Handling permission dialog...")
-                success = self.handle_permission_dialog(
-                    analysis_result.get('clickable_elements', [])
+                success = self.handle_permission_dialog_advanced(
+                    analysis_result
                 )
-                
                 if success:
-                    # 等待权限对话框处理完成后再继续
-                    time.sleep(1)
+                    return success
             
-            # 处理导入对话框
+            # 3. 处理VCard导入对话框
+            if analysis_result.get('vcard_import_dialog', {}).get('found'):
+                self.logger.info("Handling VCard import dialog...")
+                success = self.handle_vcard_import_dialog(analysis_result)
+                if success:
+                    return success
+            
+            # 4. 处理普通导入对话框
             if analysis_result.get('import_dialog', {}).get('found'):
                 self.logger.info("Handling import dialog...")
-                import_success = self.handle_import_dialog(
+                success = self.handle_import_dialog(
                     analysis_result.get('clickable_elements', [])
                 )
-                success = success or import_success
+                if success:
+                    return success
             
-            # 如果没有检测到相关对话框，尝试打开通讯录应用
-            if (not analysis_result.get('permission_dialog', {}).get('found') and
-                not analysis_result.get('import_dialog', {}).get('found') and
-                not analysis_result.get('contacts_app', {}).get('found')):
-                
-                self.logger.info("No dialogs detected, opening contacts app...")
-                success = self.open_contacts_app()
-            
-            if success:
+            # 5. 如果已在通讯录应用中，表示可能导入已完成
+            if analysis_result.get('contacts_app', {}).get('found'):
+                self.logger.info("Already in contacts app, import may be done")
                 self.automation_stats['successful_automations'] += 1
-                
-            return success
+                return True
+            
+            # 6. 如果没有检测到任何相关界面，可能需要等待或重试
+            self.logger.warning("No actionable UI elements detected")
+            return False
             
         except Exception as e:
             self.logger.error("Automated import failed: %s", str(e))
             self.automation_stats['automation_errors'] += 1
             return False
+    
+    def perform_complete_import_flow(self, max_attempts: int = 10) -> bool:
+        """
+        执行完整的导入流程，包含重试机制
+        
+        Args:
+            max_attempts: 最大尝试次数
+            
+        Returns:
+            bool: 完整流程是否成功
+        """
+        from .contacts_ui_detector import ContactsUIDetector
+        
+        detector = ContactsUIDetector(self.device_id, self.logger)
+        
+        for attempt in range(max_attempts):
+            self.logger.info("Import flow attempt %d/%d", attempt + 1,
+                             max_attempts)
+            
+            # 分析当前屏幕
+            analysis = detector.analyze_current_screen()
+            
+            if not analysis['ui_captured']:
+                self.logger.warning("UI capture failed, waiting...")
+                time.sleep(2)
+                continue
+            
+            # 执行自动化操作
+            success = self.perform_automated_import(analysis)
+            
+            if success:
+                # 等待一段时间后检查是否完成
+                time.sleep(3)
+                
+                # 再次检查状态
+                final_analysis = detector.analyze_current_screen()
+                if (final_analysis['ui_captured'] and 
+                    final_analysis['contacts_app']['found']):
+                    self.logger.info("Complete import flow successful!")
+                    return True
+            
+            # 等待后重试
+            time.sleep(2)
+        
+        self.logger.error("Complete import flow failed after %d attempts",
+                          max_attempts)
+        return False
     
     def wait_for_import_completion(self, timeout: int = 30) -> bool:
         """
