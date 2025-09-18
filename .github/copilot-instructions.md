@@ -44,7 +44,7 @@ ADB_Douyin/
 ## Technology Stack
 
 - **Language**: Python 3.7+
-- **Primary Dependencies**: 
+- **Primary Dependencies**:
   - No external packages required (uses only standard library)
   - `subprocess` for ADB command execution
   - `xml.etree.ElementTree` for UI XML parsing
@@ -54,12 +54,14 @@ ADB_Douyin/
 ## Build and Run Instructions
 
 ### Prerequisites
+
 1. **Python 3.7+** must be installed
 2. **ADB (Android Debug Bridge)** must be installed and accessible in PATH
 3. **Android device** with USB debugging enabled
 4. **Douyin app** installed on the target device
 
 ### Environment Setup
+
 ```bash
 # Verify ADB installation
 adb version
@@ -71,6 +73,7 @@ adb devices
 ```
 
 ### Running the Application (Fully Autonomous)
+
 ```bash
 # Navigate to project directory
 cd /path/to/ADB_Douyin
@@ -89,6 +92,7 @@ python smart_douyin_automator.py --analyze-performance --optimize
 ```
 
 ### Autonomous Operation Modes
+
 1. **Full Autonomous Mode**: Zero human interaction, complete decision-making autonomy
 2. **AI Agent Integration**: Designed for integration with AI agents and LLM systems
 3. **Continuous Learning**: Self-improvement through performance analysis and strategy optimization
@@ -98,6 +102,7 @@ python smart_douyin_automator.py --analyze-performance --optimize
 ## Code Quality Standards
 
 ### Critical Requirements
+
 - **Cognitive Complexity**: Functions must not exceed complexity of 15
 - **Line Length**: Maximum 79 characters per line (PEP 8 compliance)
 - **Function Length**: Maximum 50 lines per function
@@ -105,6 +110,7 @@ python smart_douyin_automator.py --analyze-performance --optimize
 - **Error Handling**: All operations must have proper exception handling with logging
 
 ### Code Style
+
 - Follow PEP 8 Python style guide strictly
 - Use descriptive variable and function names
 - Prefer explicit over implicit code
@@ -112,6 +118,7 @@ python smart_douyin_automator.py --analyze-performance --optimize
 - No hardcoded strings or magic numbers
 
 ### Development Strategy
+
 **CRITICAL**: This project focuses on production-ready, modular, AI-agent-friendly architecture.
 
 - **NO simple test versions**: Never create simplified or demo versions of functionality
@@ -126,6 +133,7 @@ python smart_douyin_automator.py --analyze-performance --optimize
 The project implements a sophisticated structured logging system designed for AI agent consumption and analysis:
 
 ### Structured Log Categories
+
 - `logs/operations/`: Timestamped operational logs with structured data for AI parsing
 - `logs/performance/`: Performance metrics, success rates, and optimization opportunities
 - `logs/decisions/`: Decision-making processes and reasoning chains for AI learning
@@ -133,6 +141,7 @@ The project implements a sophisticated structured logging system designed for AI
 - `logs/improvements/`: Self-optimization actions and their effectiveness measurements
 
 ### AI-Parseable Log Formats
+
 - **JSON Structure**: All logs use structured JSON format for easy AI parsing
 - **Contextual Data**: Rich context including state, environment, and decision factors
 - **Performance Metrics**: Quantifiable success/failure rates and timing data
@@ -140,6 +149,7 @@ The project implements a sophisticated structured logging system designed for AI
 - **Strategy Effectiveness**: Data on which automation strategies work best when
 
 ### Example Usage
+
 ```python
 logger = logging.getLogger(__name__)
 
@@ -158,24 +168,28 @@ logger.debug(f"Found {len(elements)} UI elements for analysis")
 ### Key Components
 
 1. **SmartDouyinAutomator** (`smart_douyin_automator.py`):
+
    - Autonomous main program with zero human interaction requirements
    - Integrated AI decision-making and self-optimization
    - Command-line interface designed for AI agent control
    - Structured logging output for AI analysis and learning
 
 2. **ADBInterface** (`modules/adb_interface.py`):
+
    - Advanced device management with connection recovery
    - Intelligent command execution with retry logic
    - Performance monitoring and optimization
    - Error prediction and prevention
 
 3. **UIIntelligence** (`modules/ui_intelligence.py`):
+
    - ML-enhanced UI element recognition
    - Adaptive element matching with learning capabilities
    - Multi-language and layout variation handling
    - Confidence scoring for AI decision-making
 
 4. **AutomationEngine** (`modules/automation_engine.py`):
+
    - Modular workflow execution with strategy patterns
    - Dynamic adaptation based on success metrics
    - Parallelizable operations for batch processing
@@ -188,6 +202,7 @@ logger.debug(f"Found {len(elements)} UI elements for analysis")
    - Autonomous controller for fully hands-off operation
 
 ### Error Handling Strategy
+
 - All operations wrapped in try-catch blocks
 - Specific exception types handled appropriately
 - Comprehensive logging of all error conditions
@@ -197,6 +212,7 @@ logger.debug(f"Found {len(elements)} UI elements for analysis")
 ## Development Workflow
 
 ### Making Changes
+
 1. **Always check code quality first**: Run `get_errors` to identify issues
 2. **Fix quality issues**: Address cognitive complexity, line length, and style issues
 3. **Add comprehensive logging**: Every new feature must have detailed logging
@@ -204,17 +220,19 @@ logger.debug(f"Found {len(elements)} UI elements for analysis")
 5. **Document changes**: Update docstrings and comments as needed
 
 ### Validation Steps
+
 1. **Syntax Check**: `python -m py_compile main.py`
 2. **Code Quality**: Ensure no cognitive complexity or style violations
 3. **Functional Testing**: Run detailed test mode and review logs
 4. **Integration Testing**: Verify complete workflow with actual device
 
 ### Common Pitfalls to Avoid
+
 - Never create demo or test files (use logging instead)
 - Don't build simple/demo versions - always build production-ready modular code
 - Never require human interaction - design for full autonomy
 - Don't ignore code quality warnings
-- Always handle exceptions with proper logging  
+- Always handle exceptions with proper logging
 - Don't use print() for debugging (use structured logging)
 - Avoid hardcoded device IDs or paths
 - Don't skip error handling for ADB operations
@@ -224,12 +242,13 @@ logger.debug(f"Found {len(elements)} UI elements for analysis")
 ## ADB Command Patterns
 
 ### Common Operations
+
 ```python
 # Device connection check
 adb_result = subprocess.run(['adb', 'devices'], capture_output=True, text=True)
 
 # UI XML dump
-subprocess.run(['adb', 'exec-out', 'uiautomator', 'dump', '/dev/tty'], 
+subprocess.run(['adb', 'exec-out', 'uiautomator', 'dump', '/dev/tty'],
                capture_output=True, text=True)
 
 # Element interaction
@@ -237,8 +256,9 @@ subprocess.run(['adb', 'shell', 'input', 'tap', str(x), str(y)])
 ```
 
 ### Error Conditions to Handle
+
 - Device not connected or unauthorized
-- ADB daemon not running  
+- ADB daemon not running
 - UI dump failures or timeouts
 - Invalid XML response from device
 - Permission denied for input commands
