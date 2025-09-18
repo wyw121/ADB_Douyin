@@ -1,15 +1,17 @@
-# 抖音通讯录批量关注工具
+# 智能抖音通讯录批量关注工具
 
-一个通过ADB长连接自动化操作抖音应用，批量关注通讯录好友的Python工具。
+一个智能的自动化工具，通过ADB连接自动操作抖音应用，智能识别UI元素，批量关注通讯录好友。
 
-## 功能特性
+## 🎯 核心特性
 
-- 🔗 **ADB长连接管理**：稳定的设备连接和命令执行
-- 🔍 **智能UI分析**：解析Android界面XML，智能识别按钮和控件
-- 🤖 **自动化导航**：自动导航到抖音的通讯录页面
-- 👥 **批量关注**：批量关注通讯录中的好友
-- 📊 **详细报告**：生成操作日志和结果报告
-- 🛡️ **安全控制**：操作间隔控制，避免被检测
+- 🤖 **智能自动化**：自动检测抖音状态、启动应用、智能导航
+- � **多语言识别**：支持简体中文、繁体中文、乱码文字智能识别
+- 📱 **多分辨率适配**：自动适配不同设备分辨率和屏幕尺寸
+- 🧠 **智能UI分析**：解析Android界面XML，精确定位按钮和控件
+- 🎯 **精准导航**：我 → 添加朋友 → 通讯录 的完整自动化流程
+- 👥 **批量关注**：自动识别并批量关注通讯录中的好友
+- 📊 **详细日志**：完整的操作记录和错误诊断
+- 🛡️ **安全防护**：智能操作间隔，模拟真实用户行为
 
 ## 系统要求
 
@@ -76,37 +78,30 @@ your_device_id    device
 
 ## 使用方法
 
-### 交互式模式（推荐）
+### 快速启动（推荐）
 
 ```bash
-python main.py
-```
+# Windows
+start.bat
 
-进入交互式菜单，选择相应功能：
-- UI分析模式：分析当前屏幕元素
-- 自动关注模式：执行批量关注流程
+# Linux/macOS  
+./start.sh
+```
 
 ### 命令行模式
 
-#### UI分析模式
 ```bash
-# 分析当前屏幕
-python main.py --analyze
-
-# 指定设备分析
-python main.py --analyze --device your_device_id
-```
-
-#### 自动关注模式
-```bash
-# 批量关注（默认10个）
-python main.py --auto-follow
+# 默认模式（关注5个朋友）
+python smart_douyin_automator.py
 
 # 关注指定数量
-python main.py --auto-follow --count 5
+python smart_douyin_automator.py --count 10
 
-# 指定设备和数量
-python main.py --auto-follow --device your_device_id --count 20
+# 指定设备
+python smart_douyin_automator.py --device your_device_id --count 8
+
+# 调试模式
+python smart_douyin_automator.py --debug
 ```
 
 ## 使用流程
@@ -225,7 +220,7 @@ enable_confirmation = true
 
 启用详细日志以便调试：
 ```bash
-python main.py --log-level DEBUG
+python smart_douyin_automator.py --debug
 ```
 
 ## 安全和注意事项
@@ -252,17 +247,11 @@ python main.py --log-level DEBUG
    - 管理ADB连接和命令执行
    - 提供屏幕操作接口（点击、滑动等）
 
-2. **UI元素分析**（`ui_analyzer.py`）
-   - 解析Android UI XML结构
-   - 智能识别按钮和控件位置
-
-3. **抖音自动化操作**（`douyin_automator.py`）
-   - 实现抖音应用的导航逻辑
-   - 批量关注操作流程
-
-4. **主程序入口**（`main.py`）
-   - 命令行参数处理
-   - 交互式用户界面
+2. **智能自动化程序**（`smart_douyin_automator.py`）
+   - 集成所有功能的完整解决方案
+   - 智能UI识别和多语言支持
+   - 自动化导航和批量关注逻辑
+   - 多分辨率自适应
 
 ### XML智能分析
 

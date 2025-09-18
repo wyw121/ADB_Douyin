@@ -32,7 +32,7 @@ else
 fi
 
 # 启动主程序
-echo "🚀 启动抖音自动化工具..."
-python3 main.py
+echo "🚀 启动智能抖音自动化工具..."
+python3 smart_douyin_automator.py
 
 echo "👋 程序结束"

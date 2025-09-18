@@ -45,7 +45,7 @@ venv.bak/
 Thumbs.db
 
 # ADB工具 (可选，如果不想提交二进制文件)
-platform-tools/
+# platform-tools/
 
 # 重复的目录
 ADB_Douyin/
