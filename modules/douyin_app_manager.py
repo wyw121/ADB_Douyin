@@ -8,6 +8,7 @@ import logging
 import time
 from typing import Optional
 from .adb_interface import ADBInterface
+from .ui_context_analyzer import UIContextAnalyzer
 
 
 class DouyinAppManager:
@@ -24,6 +25,7 @@ class DouyinAppManager:
         """
         self.logger = logging.getLogger(__name__)
         self.adb = adb_interface
+        self.ui_analyzer = UIContextAnalyzer()
         
         # 配置参数
         self.startup_timeout = 15  # 启动超时时间(秒)
@@ -61,6 +63,33 @@ class DouyinAppManager:
         except Exception as e:
             self.logger.error("获取抖音Activity失败: %s", str(e))
             return None
+
+    def analyze_and_log_ui_state(self, stage_name: str = "未知阶段") -> None:
+        """分析并记录当前UI状态"""
+        try:
+            self.logger.info(f"📊 {stage_name}UI状态分析:")
+            
+            # 获取UI XML
+            xml_content = self.adb.get_ui_xml()
+            if xml_content:
+                # 分析UI内容
+                context = self.ui_analyzer.analyze_context(xml_content)
+                
+                # 显示分析结果
+                self.ui_analyzer.display_context(context, stage_name)
+                
+                # 记录原始XML长度
+                self.logger.info(f"📄 原始XML长度: {len(xml_content)} 字符")
+                
+                # 记录XML开头（用于调试）
+                xml_preview = xml_content[:200] + "..." if len(xml_content) > 200 else xml_content
+                self.logger.debug(f"🔬 XML预览: {xml_preview}")
+                
+            else:
+                self.logger.warning("❌ 无法获取UI XML内容")
+                
+        except Exception as e:
+            self.logger.error(f"❌ UI状态分析失败: {e}")
 
     def stop_douyin(self) -> bool:
         """关闭抖音应用"""

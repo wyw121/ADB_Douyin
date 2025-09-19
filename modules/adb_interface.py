@@ -4,6 +4,8 @@ import logging
 import subprocess
 import time
 from typing import Optional, Tuple
+from .adb_error_handler import (ADBErrorHandler, RetryableADBCommand, 
+                                 set_global_device_id)
 
 
 class ADBInterface:
@@ -14,7 +16,7 @@ class ADBInterface:
     DEFAULT_DELAY = 1.0
     DEFAULT_TIMEOUT = 10
     
-    def __init__(self, device_id: Optional[str] = None, 
+    def __init__(self, device_id: Optional[str] = None,
                  adb_path: str = "platform-tools/adb.exe"):
         """初始化ADB接口
         
@@ -26,9 +28,19 @@ class ADBInterface:
         self.adb_path = adb_path
         self.logger = logging.getLogger(__name__)
         
+        # 初始化错误处理器
+        self.error_handler = ADBErrorHandler()
+        self.error_handler.adb_path = adb_path
+        self.retryable_command = RetryableADBCommand(self.error_handler)
+        
         # 如果没有指定设备ID，自动检测
         if not self.device_id:
             self._auto_detect_device()
+        
+        # 设置全局设备ID
+        if self.device_id:
+            self.error_handler.set_device_id(self.device_id)
+            set_global_device_id(self.device_id)
 
     def _auto_detect_device(self) -> None:
         """自动检测可用设备"""
@@ -78,7 +90,7 @@ class ADBInterface:
         return is_connected
 
     def execute_command(self, command: list) -> Optional[str]:
-        """执行ADB命令
+        """执行ADB命令（带错误处理和重试）
         
         Args:
             command: 命令参数列表
@@ -92,28 +104,14 @@ class ADBInterface:
             
         full_command = [self.adb_path, "-s", self.device_id] + command
         
-        try:
-            self.logger.debug("执行命令: %s", " ".join(full_command))
-            result = subprocess.run(
-                full_command,
-                capture_output=True,
-                text=True,
-                encoding='utf-8',
-                errors='ignore',
-                check=True
-            )
-            
+        # 使用错误处理器执行命令
+        result = self.retryable_command.execute_command(full_command)
+        
+        if result is not None:
             self.logger.debug("命令执行成功")
-            if result.stdout:
-                return result.stdout.strip()
-            else:
-                return ""
-            
-        except subprocess.CalledProcessError as e:
-            self.logger.error("命令执行失败: %s", str(e))
-            return None
-        except Exception as e:
-            self.logger.error("命令执行异常: %s", str(e))
+            return result.strip() if result else ""
+        else:
+            self.logger.error("命令执行失败: %s", " ".join(command))
             return None
 
     def get_screen_size(self) -> Optional[Tuple[int, int]]:
@@ -135,36 +133,22 @@ class ADBInterface:
         return None
 
     def get_ui_xml(self) -> Optional[str]:
-        """获取当前UI的XML结构，使用多种方法重试"""
-        max_attempts = 3
+        """获取当前UI的XML结构（带错误处理和重试）"""
+        if not self.device_id:
+            self.logger.error("未指定设备ID")
+            return None
         
-        for attempt in range(max_attempts):
-            self.logger.debug("获取UI XML - 第%d次尝试", attempt + 1)
-            
-            # 尝试方法1: 标准dump到文件
-            xml_content = self._try_standard_dump()
-            if xml_content:
-                return xml_content
-            
-            # 尝试方法2: 强制等待后重试
-            if attempt == 0:
-                self.logger.debug("标准dump失败，等待设备稳定后重试")
-                time.sleep(2)
-                xml_content = self._try_standard_dump()
-                if xml_content:
-                    return xml_content
-            
-            # 尝试方法3: 使用压缩dump (Android 7+)
-            if attempt == 1:
-                xml_content = self._try_compressed_dump()
-                if xml_content:
-                    return xml_content
-            
-            # 最后尝试：直接输出到stdout（容错性最高）
-            if attempt == max_attempts - 1:
-                xml_content = self._try_stdout_dump()
-                if xml_content:
-                    return xml_content
+        self.logger.debug("开始获取UI XML...")
+        
+        # 使用错误处理器执行UI XML获取
+        xml_content = self.retryable_command.get_ui_xml()
+        
+        if xml_content:
+            self.logger.info("✅ 成功获取UI XML (长度: %d)", len(xml_content))
+            return xml_content
+        else:
+            self.logger.error("❌ 获取UI XML失败")
+            return None
         
         self.logger.error("所有UI获取方法都失败了")
         return None

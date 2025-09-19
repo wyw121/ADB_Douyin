@@ -9,6 +9,7 @@ import time
 from typing import Optional, Tuple, Dict, Any
 from .adb_interface import ADBInterface
 from .ui_intelligence import UIAnalyzer
+from .ui_context_analyzer import UIContextAnalyzer
 
 
 class DouyinNavigationDetector:
@@ -23,6 +24,7 @@ class DouyinNavigationDetector:
         self.logger = logging.getLogger(__name__)
         self.adb = adb_interface
         self.ui_analyzer = UIAnalyzer()
+        self.ui_context = UIContextAnalyzer()
         
         # 缓存的"我"按钮位置（安全机制）
         self.cached_profile_position = None
@@ -55,6 +57,12 @@ class DouyinNavigationDetector:
         if not self.get_current_ui_safely():
             self.logger.error("无法获取UI，导航栏检测失败")
             return None
+        
+        # 添加UI上下文分析
+        xml_content = self.adb.get_ui_xml()
+        if xml_content:
+            context = self.ui_context.analyze_current_context(xml_content)
+            self.ui_context.print_context_info(context, "底部导航栏检测器")
         
         try:
             # 使用完整的导航栏结构分析
